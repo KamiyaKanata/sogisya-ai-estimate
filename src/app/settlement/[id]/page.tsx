@@ -2,8 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getCases, getEstimatesByCaseId, calcTotals } from '@/lib/data'
-import type { Case, Estimate, EstimateItem } from '@/lib/types'
+import { useQuery } from 'convex/react'
+import { api } from '../../../../convex/_generated/api'
+import type { Id } from '../../../../convex/_generated/dataModel'
+import { calcTotals } from '@/lib/data'
+import type { EstimateItem } from '@/lib/types'
 
 interface ActualItem extends EstimateItem {
   actual_quantity: number
@@ -19,32 +22,28 @@ function diff(a: number, b: number) {
 }
 
 export default function SettlementPage({ params }: { params: { id: string } }) {
-  const [caseData, setCaseData] = useState<Case | null>(null)
-  const [estimate, setEstimate] = useState<Estimate | null>(null)
+  const caseId = params.id as Id<'cases'>
+  const caseData = useQuery(api.cases.get, { id: caseId })
+  const estimates = useQuery(api.estimates.listByCase, { case_id: caseId }) ?? []
+  const estimate = estimates[estimates.length - 1] ?? null
+
   const [actuals, setActuals] = useState<ActualItem[]>([])
-  const [mounted, setMounted] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [initialized, setInitialized] = useState(false)
 
   useEffect(() => {
-    setMounted(true)
-    const c = getCases().find(c => c.id === params.id) ?? null
-    setCaseData(c)
-    if (c) {
-      const ests = getEstimatesByCaseId(c.id)
-      const est = ests[ests.length - 1] ?? null
-      setEstimate(est)
-      if (est) {
-        setActuals(est.items.map(item => ({
-          ...item,
-          actual_quantity: item.quantity,
-          actual_amount: item.amount,
-        })))
-      }
+    if (estimate && !initialized) {
+      setInitialized(true)
+      setActuals((estimate.items as EstimateItem[]).map(item => ({
+        ...item,
+        actual_quantity: item.quantity,
+        actual_amount: item.amount,
+      })))
     }
-  }, [params.id])
+  }, [estimate, initialized])
 
-  if (!mounted) return null
-  if (!caseData) return (
+  if (caseData === undefined) return <div className="p-8 text-gray-400">読み込み中...</div>
+  if (caseData === null) return (
     <div className="p-8">
       <p className="text-gray-400 mb-2">案件が見つかりません</p>
       <Link href="/dashboard" className="text-[#B8860B] text-sm">← ダッシュボードへ</Link>
@@ -71,7 +70,7 @@ export default function SettlementPage({ params }: { params: { id: string } }) {
     }))
   }
 
-  const estimateTotals = calcTotals(estimate.items)
+  const estimateTotals = calcTotals(estimate.items as EstimateItem[])
   const actualTotals = calcTotals(actuals.map(a => ({ ...a, quantity: a.actual_quantity, amount: a.actual_amount })))
   const diffTotal = actualTotals.total - estimateTotals.total
 

@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getCases } from '@/lib/data'
-import type { Case } from '@/lib/types'
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '../../../../convex/_generated/api'
+import type { Id } from '../../../../convex/_generated/dataModel'
 
 interface ProcedureItem {
   id: string
@@ -235,23 +236,6 @@ const PRIORITY_STYLE = {
 }
 const PRIORITY_LABEL = { urgent: '急ぎ', normal: '通常', low: '任意' }
 
-const STORAGE_KEY = (id: string) => `procedures_${id}`
-
-interface StoredState {
-  attrs: CaseAttributes
-  done: Record<string, boolean>
-}
-
-function loadState(caseId: string): StoredState | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY(caseId))
-    return raw ? JSON.parse(raw) : null
-  } catch { return null }
-}
-
-function saveState(caseId: string, state: StoredState) {
-  localStorage.setItem(STORAGE_KEY(caseId), JSON.stringify(state))
-}
 
 const DEFAULT_ATTRS: CaseAttributes = {
   hasPension: false, hasRealEstate: false, hasLifeInsurance: false,
@@ -260,29 +244,31 @@ const DEFAULT_ATTRS: CaseAttributes = {
 }
 
 export default function ProceduresPage({ params }: { params: { id: string } }) {
-  const [caseData, setCaseData] = useState<Case | null>(null)
-  const [mounted, setMounted] = useState(false)
+  const caseId = params.id as Id<'cases'>
+  const caseData = useQuery(api.cases.get, { id: caseId })
+  const savedProc = useQuery(api.procedures.getByCase, { case_id: caseId })
+  const upsertProc = useMutation(api.procedures.upsert)
+
   const [attrs, setAttrs] = useState<CaseAttributes>(DEFAULT_ATTRS)
   const [done, setDone] = useState<Record<string, boolean>>({})
   const [step, setStep] = useState<'attrs' | 'list'>('attrs')
   const [filterCat, setFilterCat] = useState<string>('all')
+  const [hydrated, setHydrated] = useState(false)
 
+  // Convexからデータが届いたら状態を初期化（一度だけ）
   useEffect(() => {
-    setMounted(true)
-    const c = getCases().find(c => c.id === params.id) ?? null
-    setCaseData(c)
-    if (c) {
-      const stored = loadState(c.id)
-      if (stored) {
-        setAttrs(stored.attrs)
-        setDone(stored.done)
+    if (savedProc !== undefined && !hydrated) {
+      setHydrated(true)
+      if (savedProc) {
+        setAttrs(savedProc.attrs as CaseAttributes)
+        setDone(savedProc.done as Record<string, boolean>)
         setStep('list')
       }
     }
-  }, [params.id])
+  }, [savedProc, hydrated])
 
-  if (!mounted) return null
-  if (!caseData) return (
+  if (caseData === undefined) return <div className="p-8 text-gray-400">読み込み中...</div>
+  if (caseData === null) return (
     <div className="p-8">
       <p className="text-gray-400 mb-2">案件が見つかりません</p>
       <Link href="/dashboard" className="text-[#B8860B] text-sm">← ダッシュボードへ</Link>
@@ -302,14 +288,14 @@ export default function ProceduresPage({ params }: { params: { id: string } }) {
   const progress = withDone.length > 0 ? Math.round((doneCount / withDone.length) * 100) : 0
   const urgentUndone = withDone.filter(p => p.priority === 'urgent' && !p.done)
 
-  const toggleDone = (id: string) => {
+  const toggleDone = async (id: string) => {
     const updated = { ...done, [id]: !done[id] }
     setDone(updated)
-    saveState(caseData.id, { attrs, done: updated })
+    await upsertProc({ case_id: caseId, attrs, done: updated })
   }
 
-  const handleConfirmAttrs = () => {
-    saveState(caseData.id, { attrs, done })
+  const handleConfirmAttrs = async () => {
+    await upsertProc({ case_id: caseId, attrs, done })
     setStep('list')
   }
 

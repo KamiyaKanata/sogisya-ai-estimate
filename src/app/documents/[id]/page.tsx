@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
-import { getCases } from '@/lib/data'
-import type { Case } from '@/lib/types'
+import { useQuery } from 'convex/react'
+import { api } from '../../../../convex/_generated/api'
+import type { Id, Doc } from '../../../../convex/_generated/dataModel'
+
+type CaseDoc = Doc<'cases'>
 
 // 宗派NGワードと置換マッピング
 const SECT_NG_WORDS: Record<string, { ng: string[]; replace: Record<string, string> }> = {
@@ -32,7 +35,7 @@ function checkNGWords(text: string, sect: string): { text: string; warnings: str
 }
 
 // ルールベースの文書生成（APIキーなし時のフォールバック）
-function generateObituary(c: Case): string {
+function generateObituary(c: CaseDoc): string {
   const deathDate = c.date_of_death ? new Date(c.date_of_death).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }) : '●月●日'
   const funeralDate = c.funeral_date ? new Date(c.funeral_date).toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '●月●日'
   return `訃　報
@@ -59,7 +62,7 @@ function generateObituary(c: Case): string {
 　　　　　　　　　　　　${new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}`
 }
 
-function generateCondolenceLetter(c: Case): string {
+function generateCondolenceLetter(c: CaseDoc): string {
   return `会　葬　御　礼
 
 先日は故 ${c.deceased_name} の葬儀に際しまして
@@ -75,7 +78,7 @@ ${new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
 　　喪主　${c.chief_mourner_name}`
 }
 
-function generateCeremonyOrder(c: Case): string {
+function generateCeremonyOrder(c: CaseDoc): string {
   const isJodo = c.sect?.includes('浄土真宗')
   const isBuddha = c.religion === '仏教'
   if (c.ceremony_type === '直葬') {
@@ -120,20 +123,14 @@ interface GeneratedDoc {
 }
 
 export default function DocumentsPage({ params }: { params: { id: string } }) {
-  const [caseData, setCaseData] = useState<Case | null>(null)
-  const [mounted, setMounted] = useState(false)
+  const caseId = params.id as Id<'cases'>
+  const caseData = useQuery(api.cases.get, { id: caseId })
   const [generating, setGenerating] = useState<DocType | null>(null)
   const [docs, setDocs] = useState<Partial<Record<DocType, GeneratedDoc>>>({})
   const [activeDoc, setActiveDoc] = useState<DocType | null>(null)
 
-  useEffect(() => {
-    setMounted(true)
-    const c = getCases().find(c => c.id === params.id) ?? null
-    setCaseData(c)
-  }, [params.id])
-
-  if (!mounted) return null
-  if (!caseData) return (
+  if (caseData === undefined) return <div className="p-8 text-gray-400">読み込み中...</div>
+  if (caseData === null) return (
     <div className="p-8">
       <p className="text-gray-400 mb-2">案件が見つかりません</p>
       <Link href="/dashboard" className="text-[#B8860B] text-sm">← ダッシュボードへ</Link>
