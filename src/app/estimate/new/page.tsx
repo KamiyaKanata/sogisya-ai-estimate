@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { v4 as uuidv4 } from 'uuid'
-import { SEED_PRODUCTS, addCase, addEstimate, calcTotals } from '@/lib/data'
+import { useMutation } from 'convex/react'
+import { api } from '../../../../convex/_generated/api'
+import { SEED_PRODUCTS, calcTotals } from '@/lib/data'
 import type { CeremonyType, Religion, EstimateItem, ProductCategory, BudgetPreference } from '@/lib/types'
 
 // ---- types ----
@@ -32,7 +33,6 @@ const EMPTY_FORM: FormData = {
   venue_name: '', wake_date: '', funeral_date: '', cremation_date: '',
 }
 
-const TAX_RATE: Record<string, number> = { '課税10%': 0.1, '課税8%': 0.08, '非課税': 0 }
 
 const CATEGORY_ORDER: ProductCategory[] = ['祭壇', '棺', '骨壺', '運営', '料理', '返礼品', '車両', 'その他']
 
@@ -125,6 +125,8 @@ function StepIndicator({ step }: { step: number }) {
 // ---- main component ----
 export default function EstimateNewPage() {
   const router = useRouter()
+  const createCase = useMutation(api.cases.create)
+  const createEstimate = useMutation(api.estimates.create)
   const [step, setStep] = useState(1)
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [items, setItems] = useState<EstimateItem[]>([])
@@ -206,12 +208,9 @@ export default function EstimateNewPage() {
   const { subtotal, tax, total } = calcTotals(items)
   const finalTotal = total - discount
 
-  const onSave = () => {
-    const caseId = uuidv4()
-    const estimateId = uuidv4()
+  const onSave = async () => {
     const now = new Date().toISOString()
-    addCase({
-      id: caseId,
+    const caseId = await createCase({
       deceased_name: form.deceased_name,
       deceased_kana: form.deceased_kana,
       date_of_death: form.date_of_death || now.slice(0, 10),
@@ -230,8 +229,7 @@ export default function EstimateNewPage() {
       share_token: null,
       created_at: now,
     })
-    addEstimate({
-      id: estimateId,
+    await createEstimate({
       case_id: caseId,
       version: 1,
       items,
